@@ -1,0 +1,16 @@
+tensorcircuit
+torch 
+torchvision
+tensorflow
+jax
+POT
+ott-jax
+optax
+jupyter
+qutip
+matplotlib
+Cython
+qiskit
+cirq
+tensorflow-probability
+tf-keras
