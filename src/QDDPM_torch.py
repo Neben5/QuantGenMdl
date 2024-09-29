@@ -157,7 +157,7 @@ class QDDPM(nn.Module):
         output_t = self.randomMeasure(output_full)
         return output_t
     
-    def prepareInput_t(self, inputs_T, params_tot, t, Ndata):
+    def prepareInput_t(self, inputs_T, params_tot: int, t: int, Ndata: int):
         '''
         prepare the input samples for step t
         Args:
@@ -172,7 +172,7 @@ class QDDPM(nn.Module):
                 self.input_tplus1[:,:2**self.n] = self.backwardOutput_t(self.input_tplus1, params_tot[tt])
         return self.input_tplus1
     
-    def backDataGeneration(self, inputs_T, params_tot, Ndata):
+    def backDataGeneration(self, inputs_T: int, params_tot: int, Ndata: int):
         '''
         generate the dataset in backward denoise process with training data set
         '''
@@ -185,7 +185,7 @@ class QDDPM(nn.Module):
         return states
 
 
-def naturalDistance(Set1, Set2):
+def naturalDistance(Set1: torch.Tensor, Set2: torch.Tensor):
     '''
         a natural measure on the distance between two sets of quantum states
         definition: 2*d - r1-r2
@@ -199,7 +199,7 @@ def naturalDistance(Set1, Set2):
     return 2*r12 - r11 - r22
 
 
-def WassDistance(Set1, Set2):
+def WassDistance(Set1: torch.Tensor, Set2: torch.Tensor):
     '''
         calculate the Wasserstein distance between two sets of quantum states
         the cost matrix is the inter trace distance between sets S1, S2
@@ -210,10 +210,13 @@ def WassDistance(Set1, Set2):
     return Wass_dis
 
 
-def sinkhornDistance(Set1, Set2, reg=0.005, log=False):
+def sinkhornDistance(Set1: torch.Tensor, Set2: torch.Tensor, reg: float = 0.005, log: bool = False):
     '''
-        calculate the Sinkhorn distance between two sets of quantum states
-        the cost matrix is the inter trace distance between sets S1, S2
+    Calculate the Sinkhorn distance between two sets of quantum states
+    the cost matrix is the inter trace distance between sets S1, S2
+    Args:
+        Set1: Quantum state 1
+        Set2: Quantum state
         reg: the regularization coefficient
         log: whether to use the log-solver
     '''
