@@ -14,3 +14,4 @@ qiskit
 cirq
 tensorflow-probability
 tf-keras
+scikit-image
