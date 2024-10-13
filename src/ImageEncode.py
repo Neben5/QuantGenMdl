@@ -50,7 +50,7 @@ def complexify(values: np.array):
 def generate_training(values: np.array, n_train: int, scale: float, seed=None):
     np.random.seed(seed)
     n = values.size
-    noise = np.random.randn(n_train,n)+1j*np.random.randn(n_train,n) 
+    noise = np.random.randn(n_train,n)+0j*np.random.randn(n_train,n) 
     print(noise.shape)
     print(values.shape)
     states = (noise*scale) + values
@@ -59,6 +59,12 @@ def generate_training(values: np.array, n_train: int, scale: float, seed=None):
         
     
     
+    
+    
+#!================!#
+#!  IN  PROGRESS` !#`
+#!   DO NOT USE   !#
+#!================!#
 def bloch_xyz(inputs):
     # obtain bloch sphere representation vector
     rho = contract('mi,mj->mij', inputs, inputs.conj())
