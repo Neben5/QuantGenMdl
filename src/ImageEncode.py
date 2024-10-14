@@ -24,6 +24,7 @@ a dimension of a pixel of an image. To this end:
 
 """
 
+#******** Must Check: Returns nan values in some instances*********
 def normalize(values: np.array):
     '''
     Normalizes inputs 
