@@ -1,3 +1,4 @@
+from math import ceil
 import numpy as np
 from scipy.stats import unitary_group
 from skimage.measure import block_reduce
@@ -59,6 +60,29 @@ def generate_training(values: np.array, n_train: int, scale: float, seed=None):
     return states
         
     
+def display_inputs(inputs, num, height, width):
+    final_output_nxn = np.zeros((num, height, width))
+
+    for z in range(0, num):
+        final_output_flattened = inputs[z]
+        final_output_flattened = np.abs(final_output_flattened)
+        final_output_flattened = final_output_flattened.flatten()
+        for i in range(0, height):
+            for j in range(0, width):
+                final_output_nxn[z][i][j] = final_output_flattened[(i*height) + j]
+
+
+    figs_per_row = 7
+    fig, axs = plt.subplots(ceil(num/float(figs_per_row)), figs_per_row, figsize = (21,9))
+
+    for z in range(0, num):
+        #print(final_output_nxn[z])
+        axs[int(z/figs_per_row)][z%figs_per_row].imshow(final_output_nxn[z], cmap = 'grey', interpolation = 'nearest')
+        axs[int(z/figs_per_row)][z%figs_per_row].set_title('Input = %d'%z)
+
+    plt.suptitle('Diffusion Inputs visualize')
+    plt.tight_layout()
+    plt.show()
     
     
     
