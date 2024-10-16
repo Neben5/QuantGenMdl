@@ -21,9 +21,9 @@ parser.add_argument("dir", help="Target dir for output files")
 
 
 n, na = 4, 1  # number of data and ancilla qubits
-T = 2  # number of diffusion steps
+T = 20  # number of diffusion steps
 L = 6  # layer of backward PQC
-Ndata = 10  # number of data in the training data set
+Ndata = 1000  # number of data in the training data set
 epochs = Ndata * T  # number of training epochs
 dir = ""
 
