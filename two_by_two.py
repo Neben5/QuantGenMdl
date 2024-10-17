@@ -24,8 +24,12 @@ n, na = 4, 1  # number of data and ancilla qubits
 T = 20  # number of diffusion steps
 L = 6  # layer of backward PQC
 Ndata = 1000  # number of data in the training data set
-epochs = Ndata * T  # number of training epochs
+epochs = Ndata * T + 1 # number of training epochs
 dir = ""
+
+#height and width of images in pixels
+height = 4
+width = 4
 
 
 def generate_training(
@@ -147,6 +151,46 @@ def gen_random_imgs(
         amplitude_vals[i] = np.sum(random_images[i] ** 2) ** 0.5
     return random_images, amplitude_vals
 
+def amplitude_encode_img(image: np.array, amplitude_vals: np.array):
+    """Encodes a classical image into qubit state using amplitude encoding
+    
+    Args:
+        image  (np.ndarray): 2 dimensional complex array of pixel values of image
+        amplitude_vals (np.ndarray): Array of shape (Ndata) containing image amplitudes
+    Returns:
+        np.ndarray: Array of shape (Ndata, 2 ** n) containing state values    
+    """
+
+    image_qubits = np.zeros((Ndata, 2**n)) + 1j * np.zeros((Ndata, 2**n))
+    for i in range(0, Ndata):
+        image_qubits[i] = np.ravel(image[i] / amplitude_vals[i] + 0j)
+    
+    return image_qubits
+
+def amplitude_decode_img(image_qubits: np.array, amplitude_vals: np.array, height: int, width: int):
+    """Decodes a complex qubit state into a classical pixel array for an image
+    
+    Args:
+        image_qubits (np.ndarray): Array of shape (Ndata, 2 ** n)
+
+    Returns:
+    
+    """
+    backwards_gen = np.load('test_backwardsgen.npy')
+    
+    final_output_nxn = np.zeros((Ndata, height, width))
+    final_output_flattened = np.abs(image_qubits)
+
+    for i in range(0, np.size(amplitude_vals)):
+        final_output_flattened[i] *= amplitude_vals[i]
+
+    for i in range(0, height):
+        for j in range(0, width):
+            for nth_data in range(0, Ndata):
+                final_output_nxn[nth_data][i][j] = final_output_flattened[nth_data][(i*height) + j]
+    
+    return final_output_nxn
+    
 
 def train(states_diff):
     """Trains model with forwards diffusion states
@@ -185,24 +229,8 @@ def train(states_diff):
 
 def test():
     print("Testing")
-    diff_hs = np.linspace(0.5, 4.0, T)
-    diffuse_square = np.zeros((Ndata, 2**n)) + 1j * np.zeros((Ndata, 2**n))
-    for i in range(0, Ndata):
-        diffuse_square[i] = np.array(source_values / (12**0.5)) + 1j * np.zeros(2**n)
 
-    X = torch.from_numpy(diffuse_square)
-
-    Xout = np.zeros((T + 1, Ndata, 2**n), dtype=np.complex64)
-    Xout[0] = X
-
-    for t in range(1, T + 1):
-        Xout[t] = diffModel.set_diffusionData_t(t, X, diff_hs[:t], seed=t).numpy()
-
-
-    np.save("%s/Xout_test_image" % (dir), Xout)
-
-    # use model to predict what original image was from diffused image
-    test_data_T20 = torch.tensor(Xout[T], dtype=torch.complex64)
+    # Run trained model on random image data
 
     # Created during training
     params_tot = np.load("%s/params_total_%dNdata_%dEpochs.npy" % (dir, Ndata, epochs))
@@ -210,11 +238,12 @@ def test():
     inputs_te = diffModel.HaarSampleGeneration(Ndata, seed=22)
 
     model = QDDPM(n=n, na=na, T=T, L=L)
-    # Turn image data into qubits
+
+    #Generate random images and encode them
     random_images, amplitude_vals = gen_random_imgs(Ndata, n, n)
-    random_images_qubits = np.zeros((Ndata, 2**n)) + 1j * np.zeros((Ndata, 2**n))
-    for i in range(0, Ndata):
-        random_images_qubits[i] = np.ravel(random_images[i] / amplitude_vals[i] + 0j)
+    random_images_qubits = amplitude_encode_img(random_images, amplitude_vals)
+
+    #Input encoded images into model
     data_te = model.backDataGeneration(
         torch.from_numpy(random_images_qubits), params_tot, Ndata
     )[:, :, : 2**n].numpy()
@@ -223,35 +252,8 @@ def test():
 
     # Get the nxn array of the image from data_te
     final_output_nxn = np.zeros((T + 1, Ndata, n, n))
-
     for z in range(0, T + 1):
-        final_output_flattened = data_te[z]
-        final_output_flattened = np.abs(final_output_flattened)
-        multiplier = np.max(final_output_flattened)
-        for i in range(0, np.size(amplitude_vals)):
-            final_output_flattened[:][i] *= amplitude_vals[i]
-        # final_output_flattened = final_output_flattened.flatten()
-
-        for i in range(0, n):
-            for j in range(0, n):
-                for nth_data in range(0, Ndata):
-                    final_output_nxn[z][nth_data][i][j] = final_output_flattened[
-                        nth_data
-                    ][(i * n) + j]
-
-    # Calculate mean square error
-
-    mse_calc = np.zeros((T + 1, n**2))
-    avg_backwards_vector = np.sum(data_te, axis=1) / Ndata
-
-    orig_vals = np.sum(training_data, axis=0) / Ndata
-    print("  MSE:")
-    for i in range(0, T + 1):
-        temp1 = 0
-        for j in range(0, 2**n):
-            temp1 += (np.abs(orig_vals[j] - avg_backwards_vector[i][j])) ** 2
-        print("  T%d: %f"%(i,temp1))
-        mse_calc[i] = temp1 / (n**2)
+        final_output_nxn[z] = amplitude_decode_img(data_te[z], amplitude_vals, height, width)
 
 
 if __name__ == "__main__":
