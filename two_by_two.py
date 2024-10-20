@@ -276,7 +276,7 @@ if __name__ == "__main__":
 
     training_data = generate_training(source_values, Ndata, 0.1)
 
-    states_diff, diffModel = generate_diffusion_data(training_data)
+    states_diff, diffModel = generate_diffusion_data(training_data, args.device)
 
     # train on diffusion data
     train(states_diff, args.device)

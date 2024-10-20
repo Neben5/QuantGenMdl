@@ -14,18 +14,20 @@ K = tc.set_backend('pytorch')
 tc.set_dtype('complex64')
 
 class DiffusionModel(nn.Module):
-    def __init__(self, n, T, Ndata):
+    def __init__(self, n: int, T: int, Ndata: int, device: torch.device = None):
         '''
         the diffusion quantum circuit model to scramble arbitrary set of states to Haar random states
         Args:
         n: number of qubits
         T: number of diffusion steps
         Ndata: number of samples in the dataset
+        device: Pytorch device to use
         '''
         super().__init__()
         self.n = n
         self.T = T
         self.Ndata = Ndata
+        self.device = device
     
     def HaarSampleGeneration(self, Ndata, seed):
         '''
@@ -34,9 +36,10 @@ class DiffusionModel(nn.Module):
         Args:
         Ndata: number of samples in dataset
         '''
-        np.random.seed(seed)
-        states_T = unitary_group.rvs(dim=2**self.n, size=Ndata)[:,:,0]
-        return torch.from_numpy(states_T).cfloat()
+        with torch.cuda.device(self.device):
+            np.random.seed(seed)
+            states_T = unitary_group.rvs(dim=2**self.n, size=Ndata)[:,:,0]
+            return torch.from_numpy(states_T, device=self.device).cfloat()
     
     def scrambleCircuit_t(self, t, input, phis, gs=None):
         '''
@@ -47,18 +50,19 @@ class DiffusionModel(nn.Module):
         phis: the single-qubit rotation angles in diffusion circuit
         gs: the angle of RZZ gates in diffusion circuit when n>=2
         '''
-        c = tc.Circuit(self.n, inputs=input)
-        for tt in range(t):
-            # single qubit rotations
-            for i in range(self.n):
-                c.rz(i, theta=phis[3*self.n*tt+i])
-                c.ry(i, theta=phis[3*self.n*tt+self.n+i])
-                c.rz(i, theta=phis[3*self.n*tt+2*self.n+i])
-            # homogenous RZZ on every pair of qubits (n>=2)
-            if self.n >= 2:
-                for i, j in combinations(range(self.n), 2):
-                    c.rzz(i, j, theta=gs[tt]/(2*np.sqrt(self.n)))
-        return c.state()
+        with torch.cuda.device(self.device):
+            c = tc.Circuit(self.n, inputs=input).to(self.device)
+            for tt in range(t):
+                # single qubit rotations
+                for i in range(self.n):
+                    c.rz(i, theta=phis[3*self.n*tt+i])
+                    c.ry(i, theta=phis[3*self.n*tt+self.n+i])
+                    c.rz(i, theta=phis[3*self.n*tt+2*self.n+i])
+                # homogenous RZZ on every pair of qubits (n>=2)
+                if self.n >= 2:
+                    for i, j in combinations(range(self.n), 2):
+                        c.rzz(i, j, theta=gs[tt]/(2*np.sqrt(self.n)))
+            return c.state()
     
     def set_diffusionData_t(self, t, inputs, diff_hs, seed):
         '''
@@ -69,47 +73,49 @@ class DiffusionModel(nn.Module):
         diff_hs: the hyper-parameter to control the amplitude of quantum circuit angles
         '''
         # set single-qubit rotation angles
-        np.random.seed(seed)
-        phis = torch.rand(self.Ndata, 3*self.n*t)*np.pi/4. - np.pi/8.
-        phis = phis*(diff_hs.repeat(3*self.n))
-        if self.n > 1:
-            # set homogenous RZZ gate angles
-            gs = torch.rand(self.Ndata, t)*0.2 + 0.4
-            gs *= diff_hs
-        states = torch.zeros((self.Ndata, 2**self.n)).cfloat()
-        for i in range(self.Ndata):
+        with torch.cuda.device(self.device):
+            np.random.seed(seed)
+            phis = torch.rand(self.Ndata, 3*self.n*t)*np.pi/4. - np.pi/8.
+            phis = phis*(diff_hs.repeat(3*self.n))
             if self.n > 1:
-                states[i] = self.scrambleCircuit_t(t, inputs[i], phis[i], gs[i])
-            else:
-                states[i] = self.scrambleCircuit_t(t, inputs[i], phis[i])
-        return states
+                # set homogenous RZZ gate angles
+                gs = torch.rand(self.Ndata, t)*0.2 + 0.4
+                gs *= diff_hs
+            states = torch.zeros((self.Ndata, 2**self.n)).cfloat()
+            for i in range(self.Ndata):
+                if self.n > 1:
+                    states[i] = self.scrambleCircuit_t(t, inputs[i], phis[i], gs[i])
+                else:
+                    states[i] = self.scrambleCircuit_t(t, inputs[i], phis[i])
+            return states
 
 
-def backCircuit(input, params, n_tot, L):
+def backCircuit(input, params, n_tot, L, device: torch.device = None):
     '''
     the backward denoise parameteric quantum circuits,
     designed following the hardware-efficient ansatz
     output is the state before measurmeents on ancillas
     Args:
-    input: input quantum state of n_tot qubits
+    input: input quantum encoded state of n_tot qubits
     params: the parameters of the circuit
     n_tot: number of qubits in the circuits
     L: layers of circuit
     '''
-    c = tc.Circuit(n_tot, inputs=input)
-    for l in range(L):
-        for i in range(n_tot):
-            c.rx(i, theta=params[2*n_tot*l+i])
-            c.ry(i, theta=params[2*n_tot*l+n_tot+i])
-        for i in range(n_tot//2):
-            c.cz(2*i, 2*i+1)
-        for i in range((n_tot-1)//2):
-            c.cz(2*i+1, 2*i+2)
-    return c.state()
+    with torch.cuda.device(device):
+        c = tc.Circuit(n_tot, inputs=input)
+        for l in range(L):
+            for i in range(n_tot):
+                c.rx(i, theta=params[2*n_tot*l+i])
+                c.ry(i, theta=params[2*n_tot*l+n_tot+i])
+            for i in range(n_tot//2):
+                c.cz(2*i, 2*i+1)
+            for i in range((n_tot-1)//2):
+                c.cz(2*i+1, 2*i+2)
+        return c.state()
 
 
 class QDDPM(nn.Module):
-    def __init__(self, n, na, T, L):
+    def __init__(self, n: int, na: int, T: int, L: int, device: torch.device = None):
         '''
         the QDDPM model: backward process only work on cpu
         Args:
@@ -124,11 +130,14 @@ class QDDPM(nn.Module):
         self.n_tot = n + na
         self.T = T
         self.L = L
+        self.device = device
         # embed the circuit to a vectorized pytorch neural network layer
-        self.backCircuit_vmap = K.vmap(partial(backCircuit, n_tot=self.n_tot, L=L), vectorized_argnums=0)
+        with torch.cuda.device(self.device):
+            self.backCircuit_vmap = K.vmap(partial(backCircuit, n_tot=self.n_tot, L=L), vectorized_argnums=0)
 
     def set_diffusionSet(self, states_diff):
-        self.states_diff = torch.from_numpy(states_diff).cfloat()
+        with torch.cuda.device(self.device):
+            self.states_diff = torch.from_numpy(states_diff).cfloat()
 
     def randomMeasure(self, inputs):
         '''
@@ -138,12 +147,13 @@ class QDDPM(nn.Module):
         Args:
         inputs: states to be measured, first na qubit is ancilla
         '''
-        m_probs = (torch.abs(inputs.reshape(inputs.shape[0], 2**self.na, 2**self.n))**2).sum(dim=2)
-        m_res = torch.multinomial(m_probs, num_samples=1).squeeze() # measurment results
-        indices = 2**self.n * m_res.view(-1, 1) + torch.arange(2**self.n)
-        post_state = torch.gather(inputs, 1, indices)
-        norms = torch.sqrt(torch.sum(torch.abs(post_state)**2, axis=1)).unsqueeze(dim=1)
-        return 1./norms * post_state
+        with torch.cuda.device(self.device):
+            m_probs = (torch.abs(inputs.reshape(inputs.shape[0], 2**self.na, 2**self.n))**2).sum(dim=2)
+            m_res = torch.multinomial(m_probs, num_samples=1).squeeze() # measurment results
+            indices = 2**self.n * m_res.view(-1, 1) + torch.arange(2**self.n)
+            post_state = torch.gather(inputs, 1, indices)
+            norms = torch.sqrt(torch.sum(torch.abs(post_state)**2, axis=1)).unsqueeze(dim=1)
+            return 1./norms * post_state
 
     def backwardOutput_t(self, inputs, params):
         '''
@@ -164,28 +174,30 @@ class QDDPM(nn.Module):
         inputs_T: the input state at the beginning of backward
         params_tot: all circuit parameters till step t+1
         '''
-        self.input_tplus1 = torch.zeros((Ndata, 2**self.n_tot)).cfloat()
-        self.input_tplus1[:,:2**self.n] = inputs_T
-        params_tot = torch.from_numpy(params_tot).float()
-        with torch.no_grad():
-            for tt in range(self.T-1, t, -1):
-                self.input_tplus1[:,:2**self.n] = self.backwardOutput_t(self.input_tplus1, params_tot[tt])
-        return self.input_tplus1
+        with torch.cuda.device(self.device):
+            self.input_tplus1 = torch.zeros((Ndata, 2**self.n_tot)).cfloat()
+            self.input_tplus1[:,:2**self.n] = inputs_T
+            params_tot = torch.from_numpy(params_tot).float()
+            with torch.no_grad():
+                for tt in range(self.T-1, t, -1):
+                    self.input_tplus1[:,:2**self.n] = self.backwardOutput_t(self.input_tplus1, params_tot[tt])
+            return self.input_tplus1
     
     def backDataGeneration(self, inputs_T: int, params_tot: int, Ndata: int):
         '''
         generate the dataset in backward denoise process with training data set
         '''
-        states = torch.zeros((self.T+1, Ndata, 2**self.n_tot)).cfloat()
-        states[-1, :, :2**self.n] = inputs_T
-        params_tot = torch.from_numpy(params_tot).float()
-        with torch.no_grad():
-            for tt in range(self.T-1, -1, -1):
-                states[tt, :, :2**self.n] = self.backwardOutput_t(states[tt+1], params_tot[tt])
-        return states
+        with torch.cuda.device(self.device):
+            states = torch.zeros((self.T+1, Ndata, 2**self.n_tot)).cfloat()
+            states[-1, :, :2**self.n] = inputs_T
+            params_tot = torch.from_numpy(params_tot).float()
+            with torch.no_grad():
+                for tt in range(self.T-1, -1, -1):
+                    states[tt, :, :2**self.n] = self.backwardOutput_t(states[tt+1], params_tot[tt])
+            return states
 
 
-def naturalDistance(Set1: torch.Tensor, Set2: torch.Tensor):
+def naturalDistance(Set1: torch.Tensor, Set2: torch.Tensor, device: torch.device = None):
     '''
         a natural measure on the distance between two sets of quantum states
         definition: 2*d - r1-r2
@@ -193,24 +205,27 @@ def naturalDistance(Set1: torch.Tensor, Set2: torch.Tensor):
         r1/r2: mean of intra-distance within Set1/Set2
     '''
     # a natural measure on the distance between two sets, according to trace distance
-    r11 = 1. - torch.mean(torch.abs(contract('mi,ni->mn', Set1.conj(), Set1))**2)
-    r22 = 1. - torch.mean(torch.abs(contract('mi,ni->mn', Set2.conj(), Set2))**2)
-    r12 = 1. - torch.mean(torch.abs(contract('mi,ni->mn', Set1.conj(), Set2))**2)
-    return 2*r12 - r11 - r22
+    with torch.cuda.device(device):
+
+        r11 = 1. - torch.mean(torch.abs(contract('mi,ni->mn', Set1.conj(), Set1))**2)
+        r22 = 1. - torch.mean(torch.abs(contract('mi,ni->mn', Set2.conj(), Set2))**2)
+        r12 = 1. - torch.mean(torch.abs(contract('mi,ni->mn', Set1.conj(), Set2))**2)
+        return 2*r12 - r11 - r22
 
 
-def WassDistance(Set1: torch.Tensor, Set2: torch.Tensor):
+def WassDistance(Set1: torch.Tensor, Set2: torch.Tensor, device: torch.device = None):
     '''
         calculate the Wasserstein distance between two sets of quantum states
         the cost matrix is the inter trace distance between sets S1, S2
     '''
-    D = 1. - torch.abs(Set1.conj() @ Set2.T)**2.
-    emt = torch.empty(0)
-    Wass_dis = ot.emd2(emt, emt, M=D)
-    return Wass_dis
+    with torch.cuda.device(device):
+        D = 1. - torch.abs(Set1.conj() @ Set2.T)**2.
+        emt = torch.empty(0)
+        Wass_dis = ot.emd2(emt, emt, M=D)
+        return Wass_dis
 
 
-def sinkhornDistance(Set1: torch.Tensor, Set2: torch.Tensor, reg: float = 0.005, log: bool = False):
+def sinkhornDistance(Set1: torch.Tensor, Set2: torch.Tensor, reg: float = 0.005, log: bool = False, device: torch.device = None):
     '''
     Calculate the Sinkhorn distance between two sets of quantum states
     the cost matrix is the inter trace distance between sets S1, S2
@@ -220,10 +235,11 @@ def sinkhornDistance(Set1: torch.Tensor, Set2: torch.Tensor, reg: float = 0.005,
         reg: the regularization coefficient
         log: whether to use the log-solver
     '''
-    D = 1. - torch.abs(Set1.conj() @  Set2.T)**2.
-    emt = torch.empty(0)
-    if log == True:
-        sh_dis = ot.sinkhorn2(emt, emt, M=D, reg=reg, method='sinkhorn_log')
-    else:
-        sh_dis = ot.sinkhorn2(emt, emt, M=D, reg=reg)
-    return sh_dis
+    with torch.cuda.device(device):
+        D = 1. - torch.abs(Set1.conj() @  Set2.T)**2.
+        emt = torch.empty(0)
+        if log == True:
+            sh_dis = ot.sinkhorn2(emt, emt, M=D, reg=reg, method='sinkhorn_log')
+        else:
+            sh_dis = ot.sinkhorn2(emt, emt, M=D, reg=reg)
+        return sh_dis
