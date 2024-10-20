@@ -55,7 +55,7 @@ def generate_source():
 
 
 def generate_diffusion_data(
-    source_values: np.ndarray,
+    source_values: np.ndarray, device: torch.device
 ) -> tuple[np.ndarray, DiffusionModel]:
     """Generates diffusion data and model
 
@@ -68,7 +68,7 @@ def generate_diffusion_data(
     """
     diff_hs = np.linspace(0.5, 4.0, T)
 
-    model_diff = DiffusionModel(n, T, Ndata)
+    model_diff = DiffusionModel(n, T, Ndata, device=device)
     X = torch.from_numpy(source_values)
     Xout = np.zeros((T + 1, Ndata, 2**n), dtype=np.complex128)
     Xout[0] = X
@@ -80,7 +80,7 @@ def generate_diffusion_data(
     return Xout, model_diff
 
 
-def Training_t(model, t, inputs_T, params_tot, Ndata, epochs):
+def Training_t(model, t, inputs_T, params_tot, Ndata, epochs, device: torch.device):
     """
     the training for the backward PQC at step t
     input_t_plus_1: the output from step t+1, as the role of input at step t
@@ -112,7 +112,7 @@ def Training_t(model, t, inputs_T, params_tot, Ndata, epochs):
         true_data = states_diff[t, indices]
 
         output_t = model.backwardOutput_t(input_t_plus_1, params_t)
-        loss = naturalDistance(output_t, true_data)
+        loss = naturalDistance(output_t, true_data, device=device)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -192,7 +192,7 @@ def amplitude_decode_img(image_qubits: np.array, amplitude_vals: np.array, heigh
     return final_output_nxn
     
 
-def train(states_diff):
+def train(states_diff, device):
     """Trains model with forwards diffusion states
 
     Args:
@@ -212,7 +212,7 @@ def train(states_diff):
         for tt in range(t + 1, T):
             params_tot[tt] = np.load("%s/params_t%d.npy" % (dir, tt))
 
-        params, loss_hist = Training_t(model, t, inputs_T, params_tot, Ndata, epochs)
+        params, loss_hist = Training_t(model, t, inputs_T, params_tot, Ndata, epochs, device)
 
         np.save("%s/params_t%d" % (dir, t), params.detach().numpy())
         np.save("%s/loss_t%d" % (dir, t), loss_hist.detach().numpy())
@@ -227,7 +227,7 @@ def train(states_diff):
     np.save("%s/params_total_%dNdata_%dEpochs" % (dir, Ndata, epochs), params_tot)
     np.save("%s/loss_tot_%dNdata_%dEpochs" % (dir, Ndata, epochs), loss_tot)
 
-def test():
+def test(device : torch.device):
     print("Testing")
 
     # Run trained model on random image data
@@ -237,7 +237,7 @@ def test():
 
     inputs_te = diffModel.HaarSampleGeneration(Ndata, seed=22)
 
-    model = QDDPM(n=n, na=na, T=T, L=L)
+    model = QDDPM(n=n, na=na, T=T, L=L, device=device)
 
     #Generate random images and encode them
     random_images, amplitude_vals = gen_random_imgs(Ndata, n, n)
@@ -271,14 +271,14 @@ if __name__ == "__main__":
         print("No GPU available. Torch will use CPU.")
         args.device = torch.device('cpu')
 
-    with torch.cuda.device(args.device):
-        source_values = generate_source()
 
-        training_data = generate_training(source_values, Ndata, 0.1)
+    source_values = generate_source()
 
-        states_diff, diffModel = generate_diffusion_data(training_data)
+    training_data = generate_training(source_values, Ndata, 0.1)
 
-        # train on diffusion data
-        train(states_diff)
-        # Diffuse our test image
-        test()
+    states_diff, diffModel = generate_diffusion_data(training_data)
+
+    # train on diffusion data
+    train(states_diff, args.device)
+    # Diffuse our test image
+    test(args.device)
