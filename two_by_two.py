@@ -262,19 +262,23 @@ if __name__ == "__main__":
         print("Invalid dir. Exiting")
         exit(1)
     dir = args.dir
-    if args.g:
-        if torch.cuda.is_available():
-            print(f"GPU: {torch.cuda.get_device_name(0)} is available.")
-        else:
-            print("No GPU available. Torch will use CPU.")
+    args.device = None
+    if args.g and torch.cuda.is_available():
+        gpu = torch.cuda.get_device_name(0)
+        print(f"GPU: {gpu} is available. Torch will use {gpu}.")
+        args.device = torch.device('cuda')
+    else:
+        print("No GPU available. Torch will use CPU.")
+        args.device = torch.device('cpu')
 
-    source_values = generate_source()
+    with torch.cuda.device(args.device):
+        source_values = generate_source()
 
-    training_data = generate_training(source_values, Ndata, 0.1)
+        training_data = generate_training(source_values, Ndata, 0.1)
 
-    states_diff, diffModel = generate_diffusion_data(training_data)
+        states_diff, diffModel = generate_diffusion_data(training_data)
 
-    # train on diffusion data
-    train(states_diff)
-    # Diffuse our test image
-    test()
+        # train on diffusion data
+        train(states_diff)
+        # Diffuse our test image
+        test()
